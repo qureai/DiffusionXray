@@ -12,5 +12,7 @@
 # Ignore PyTorch model files
 *.pt
 *.pth
-
+*.out
+*.log
+*.wandb
 
