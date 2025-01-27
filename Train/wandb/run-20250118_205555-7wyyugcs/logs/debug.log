@@ -1,0 +1,29 @@
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Current SDK version is 0.17.1
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Configure stats pid to 288184
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Loading settings from /home/ubuntu/.config/wandb/settings
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Loading settings from /raid/data_transfer/Train/wandb/settings
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': '03_train_sr3_ddp_final.py', 'program_abspath': '/raid/data_transfer/Train/03_train_sr3_ddp_final.py', 'program': '/raid/data_transfer/Train/03_train_sr3_ddp_final.py'}
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_setup.py:_flush():76] Applying login settings: {}
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_init.py:_log_setup():520] Logging user logs to /raid/data_transfer/Train/wandb/run-20250118_205555-7wyyugcs/logs/debug.log
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_init.py:_log_setup():521] Logging internal logs to /raid/data_transfer/Train/wandb/run-20250118_205555-7wyyugcs/logs/debug-internal.log
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_init.py:init():560] calling init triggers
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_init.py:init():567] wandb.init called with sweep_config: {}
+config: {'epochs': 1000, 'batch_size': 20, 'num_workers': 16, 'learning_rate': 5e-05, 'print_freq': 50, 'save_freq': 1000, 'sample_freq': 5000, 'sample_size': 4, 'resume_checkpoint': '/raid/data_transfer/checkpoints_ddpm_lowres/model_epoch_241_step_19000.pt', 'data_root': '/raid/data_transfer/', 'log_dir': '/raid/data_transfer/chexray-diffusion/checkpoints_ddpm_lowres_newdata_finalft', 'checkpoint_dir': '/raid/data_transfer/Train/checkpoints_jan_ddpm_lr_paired_new', 'model_params': {'dim': 16, 'channels': 2, 'out_dim': 1, 'dim_mults': (1, 2, 4, 8, 16, 32, 32, 32)}, 'schedule_params': {'name': 'cosine', 'timesteps': 2000}, 'diffusor_params': {}, 'loss_func': 'l1'}
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_init.py:init():610] starting backend
+2025-01-18 20:55:55,675 INFO    MainThread:288184 [wandb_init.py:init():614] setting up manager
+2025-01-18 20:55:55,677 INFO    MainThread:288184 [backend.py:_multiprocessing_setup():105] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-01-18 20:55:55,678 INFO    MainThread:288184 [wandb_init.py:init():622] backend started and connected
+2025-01-18 20:55:55,681 INFO    MainThread:288184 [wandb_init.py:init():711] updated telemetry
+2025-01-18 20:55:55,681 INFO    MainThread:288184 [wandb_init.py:init():744] communicating run to backend with 90.0 second timeout
+2025-01-18 20:55:56,366 INFO    MainThread:288184 [wandb_run.py:_on_init():2402] communicating current version
+2025-01-18 20:55:56,409 INFO    MainThread:288184 [wandb_run.py:_on_init():2411] got version response upgrade_message: "wandb version 0.19.4 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2025-01-18 20:55:56,409 INFO    MainThread:288184 [wandb_init.py:init():795] starting run threads in backend
+2025-01-18 20:55:58,324 INFO    MainThread:288184 [wandb_run.py:_console_start():2380] atexit reg
+2025-01-18 20:55:58,324 INFO    MainThread:288184 [wandb_run.py:_redirect():2235] redirect: wrap_raw
+2025-01-18 20:55:58,324 INFO    MainThread:288184 [wandb_run.py:_redirect():2300] Wrapping output streams.
+2025-01-18 20:55:58,324 INFO    MainThread:288184 [wandb_run.py:_redirect():2325] Redirects installed.
+2025-01-18 20:55:58,325 INFO    MainThread:288184 [wandb_init.py:init():838] run started, returning control to user process
+2025-01-18 20:56:13,053 WARNING MsgRouterThr:288184 [router.py:message_loop():77] message_loop has been closed

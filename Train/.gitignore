@@ -1,0 +1,16 @@
+# Ignore image files
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.webp
+*.svg
+
+# Ignore PyTorch model files
+*.pt
+*.pth
+
+

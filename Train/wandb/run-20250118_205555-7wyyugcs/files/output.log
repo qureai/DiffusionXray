@@ -1,0 +1,11 @@
+
+Epoch number : 1
+Exception ignored in: <function _MultiProcessingDataLoaderIter.__del__ at 0x7fefe6979ca0>
+Traceback (most recent call last):
+  File "/home/ubuntu/miniconda3/envs/cascade7/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1479, in __del__
+    self._shutdown_workers()
+  File "/home/ubuntu/miniconda3/envs/cascade7/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1438, in _shutdown_workers
+    self._mark_worker_as_unavailable(worker_id, shutdown=True)
+  File "/home/ubuntu/miniconda3/envs/cascade7/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1380, in _mark_worker_as_unavailable
+    assert self._workers_status[worker_id] or (self._persistent_workers and shutdown)
+AttributeError: '_MultiProcessingDataLoaderIter' object has no attribute '_workers_status'
