@@ -1,88 +1,51 @@
-"""Train a diffusion model for super resolution."""
 import os
-from typing import (
-    Dict,
-    Final,
-    List,
-)
+from typing import Dict, Final, List
 
 import torch
-import gc 
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import wandb
 from torch import Tensor
-from torchmetrics import MeanMetric
-from torch.utils.data import ConcatDataset, Dataset
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Adam, Optimizer
 from torch.utils.data import DataLoader, DistributedSampler
 from torchmetrics import MeanMetric
-from torchvision.transforms import (
-    Compose,
-    Grayscale,
-    Lambda,
-    ToTensor,
-)
+from torchvision.transforms import Compose, Grayscale, Lambda, ToTensor
 from tqdm import tqdm
-from PIL import Image
 
 from diffusion.controller import DiffusionController
-from diffusion.data import MaCheXDataset
 from diffusion.diffusor import SR3DDIMDiffusor
 from diffusion.utils import plot_image
 
+print("Environment setup complete.")
 
-class CustomSRDataset(Dataset):
-    def __init__(self, root: str, transforms: Compose) -> None:
-        self.root = root
-        self.transforms = transforms
 
-        self.sr_dir = os.path.join('/raid/MUNIT_data', '300k_lr_gaussian')
-        self.hr_dir = os.path.join('/raid/data_transfer/UNIT/100k', '100k_hr')
-        self.image_names = os.listdir(self.sr_dir)
+#check data loading : done 
+#check configs : done 
+#check wandb : done 
+#check data folder structure : done 
+#check checkpoint saving : 
+#run testing training  on 5 images : 
+# why only one epoch is happening :  
 
-    def __len__(self):
-        return len(self.image_names)
+#put it on 13e2e , using 1,2,3 gpu 
 
-    def __getitem__(self, idx: int):
-        img_name = self.image_names[idx]
-
-        sr_img_path = os.path.join(self.sr_dir, img_name)
-        hr_img_path = os.path.join(self.hr_dir, img_name)
-
-        sr_img = Image.open(sr_img_path).convert('L')  # Assuming grayscale images
-        hr_img = Image.open(hr_img_path).convert('L')  # Assuming grayscale images
-
-        # Resize to 1024x1024 if not already that size using bicubic interpolation
-        if sr_img.size != (1024, 1024):
-            sr_img = sr_img.resize((1024, 1024), Image.BICUBIC)
-        if hr_img.size != (1024, 1024):
-            hr_img = hr_img.resize((1024, 1024), Image.BICUBIC)
-
-        sr_img = self.transforms(sr_img)
-        hr_img = self.transforms(hr_img)
-
-        return {'LR': sr_img, 'HR': hr_img, 'SR': sr_img}
-
-#print("Environment setup complete.")
 
 
 
 BASE_CONFIG: Final = {
-    'epochs': 1000,
-    'batch_size': 20,
+    'epochs': 250,
+    'batch_size': 8,
     'num_workers': 16,
     'learning_rate': 5e-5,
     'print_freq': 50,
     'save_freq': 1000,
     'sample_freq': 5000,
     'sample_size': 4,
-    'resume_checkpoint': '/raid/data_transfer/chexray-diffusion/Train/checkpoints_ddpm_new_lowres/model_epoch_292_step_334000.pt', #change this 
-    'data_root': '/raid/data_transfer/',
-    'log_dir': '/raid/data_transfer/chexray-diffusion/checkpoints_ddpm_lowres_newdata_finalft', #change this
-    'checkpoint_dir': 'checkpoints',
+    'resume_checkpoint': '/home/users/aryan.goyal/chexray-diffusion/cheff_sr_fine.pt',  # path to non-fine-tuned
+    'data_root': '/home/users/aryan.goyal/chexray-diffusion/sample_out/high_res_short',
+    'log_dir': 'logs/sr3',
     'model_params': {
         'dim': 16,
         'channels': 2,
@@ -97,23 +60,23 @@ BASE_CONFIG: Final = {
     'loss_func': 'l1',
 }
 
-#print("configs checked")
+print("configs checked")
 
-#checkpointt = torch.load(BASE_CONFIG['resume_checkpoint'])
-#print(checkpointt.keys())
+checkpointt = torch.load(BASE_CONFIG['resume_checkpoint'])
+print(checkpointt.keys())
 
 def run(rank: int, world_size: int, cfg: Dict) -> None:
     """Kick off training."""
     setup(rank, world_size)
     device = torch.device(rank)
 
-    if rank == 0:
-        wandb.init(project='fine-tuning-chexray-16th-aug-lowres-ddpm-300k-final-finetuning', config=cfg)
+    # if rank == 0:
+    # wandb.init(project='chex-sr3', config=cfg)
 
     # ----------------------------------------------------------------------------------
     # CREATE DIFFUSION MODEL
     # ----------------------------------------------------------------------------------
-    #print("creating diffusion model ..")
+    print("creating diffusion model ..")
     diff = DiffusionController(
         model_params=cfg['model_params'],
         schedule_params=cfg['schedule_params'],
@@ -128,12 +91,10 @@ def run(rank: int, world_size: int, cfg: Dict) -> None:
     optimizer = Adam(diff.get_model_params(), lr=cfg['learning_rate'])
 
     if cfg['resume_checkpoint'] is not None and os.path.exists(
-        cfg['resume_checkpoint']
+            cfg['resume_checkpoint']
     ):
         state_dict = torch.load(cfg['resume_checkpoint'], map_location=device)
         diff.model.module.load_state_dict(state_dict['model'])
-
-
 
         if 'optimizer' in state_dict:
             optimizer.load_state_dict(state_dict['optimizer'])
@@ -145,7 +106,6 @@ def run(rank: int, world_size: int, cfg: Dict) -> None:
         else:
             print("Epoch information not found in the checkpoint, setting epoch to 0.")
             cfg['resume_ep'] = 0
-        
 
         if 'steps' in state_dict:
             cfg['resume_steps'] = state_dict['steps']
@@ -158,44 +118,20 @@ def run(rank: int, world_size: int, cfg: Dict) -> None:
                     cfg['resume_ep'], cfg['resume_steps']
                 )
             )
-        
-        del(state_dict)
-        gc.collect()
-
-    #print("CREATE DIFFUSION MODEL done")
+    print("CREATE DIFFUSION MODEL done")
     # ----------------------------------------------------------------------------------
     # DATASETS & DATALOADERS
     # ----------------------------------------------------------------------------------
 
     transforms = Compose([Grayscale(), ToTensor(), Lambda(rescale)])
 
-
-
-    train_dataset = CustomSRDataset(
-        root=cfg['data_root'],
+    train_loader, val_loader = create_dataloaders(
+        data_root=cfg['data_root'],
+        batch_size=cfg['batch_size'],
+        num_workers=cfg['num_workers'],
         transforms=transforms,
     )
-
-
-
-    
-
-    train_sampler = DistributedSampler(
-        train_dataset,
-        num_replicas=world_size,
-        rank=rank,
-        shuffle=True,
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=cfg['batch_size'],
-        sampler=train_sampler,
-        persistent_workers=True,
-        num_workers=cfg['num_workers'],
-        pin_memory=True,
-    )
-    #print("data loaded")
+    print("data loaded")
     # ----------------------------------------------------------------------------------
     # CONDUCT TRAINING
     # ----------------------------------------------------------------------------------
@@ -209,8 +145,7 @@ def run(rank: int, world_size: int, cfg: Dict) -> None:
         cfg=cfg,
     )
 
-
-    #print("training configs done")
+    print("training configs done")
 
 
 def rescale(x: Tensor) -> Tensor:
@@ -219,13 +154,13 @@ def rescale(x: Tensor) -> Tensor:
 
 
 def train(
-    diff: DiffusionController,
-    optimizer: Optimizer,
-    train_loader: DataLoader,
-    epochs: int,
-    rank: int,
-    world_size: int,
-    cfg: Dict,
+        diff: DiffusionController,
+        optimizer: Optimizer,
+        train_loader: DataLoader,
+        epochs: int,
+        rank: int,
+        world_size: int,
+        cfg: Dict,
 ) -> None:
     """Execute training procedure."""
     device = diff.device
@@ -234,74 +169,57 @@ def train(
     # ----------------------------------------------------------------------------------
     # METRICS
     # ----------------------------------------------------------------------------------
-    #metric_train_loss = MeanMetric(compute_on_step=False).to(device)
-    metric_train_loss = MeanMetric().to(device)
-    # We also define a dictionary that keeps track over all computed metrics.
+    metric_train_loss = MeanMetric(compute_on_step=False).to(device)
+
+    # We also define a dictionary that keeps track of all computed metrics.
     metrics: Dict[str, List] = {
         'train/loss': [],
     }
 
     log_dir = cfg['log_dir']
-    checkpoint_dir = cfg['checkpoint_dir']
     os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    #print("START TRAINING PROCEDURE")
+    print("START TRAINING PROCEDURE")
     # ----------------------------------------------------------------------------------
     # START TRAINING PROCEDURE
     # ----------------------------------------------------------------------------------
     steps = 0 if cfg.get('resume_steps') is None else cfg.get('resume_steps')
     ep_start = 1 if cfg.get('resume_ep') is None else cfg.get('resume_ep')
-    for ep in range(ep_start, epochs + 1):
-        print("Epoch number :" , ep)
-          # type: ignore
-        #print("training loop starts")
+    for ep in range(ep_start, epochs + 1):  # type: ignore
+
         # ------------------------------------------------------------------------------
         # TRAINING LOOP
         # ------------------------------------------------------------------------------
         for batch in tqdm(train_loader, leave=False):
-            # True high resolution ground truth
+            # True high-resolution ground truth
             x_hr = batch['HR'].to(device)
-            # Interpolated low resolution as conditioning
+            # Interpolated low-resolution as conditioning
             x_sr = batch['SR'].to(device)
 
             # Sample random timestep
             t = torch.randint(
-                0, diff.schedule.timesteps, (x_sr.shape[0],), device=device
+                0, diff.schedule.timesteps, (x_hr.shape[0],), device=device
             ).long()
 
-            # Create noisy HR image
-            noise = torch.randn_like(x_sr)
-            x_sr_noisy = diff.diffusor.q_sample(x_start=x_sr, t=t, noise=noise)
-
-            # Concatenate noisy HR image with SR image
-            x_in = torch.cat([x_sr_noisy, x_hr], dim=1)
-
-           
-
-            # Predict noise on HR image
             with autocast():
-                # Predict noise on HR image
-                predicted_noise = diff.model(x_in, t)
-                # Compute loss
-                batch_loss = diff.loss_func(noise, predicted_noise)
+                loss = diff(x_hr, x_sr, t)
+                batch_loss = loss.mean()
 
             optimizer.zero_grad()
             scaler.scale(batch_loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            metric_train_loss(batch_loss)
-            steps += 1  # type: ignore
+            steps += 1
+            metric_train_loss.update(batch_loss.item())
 
-            #print("intermediate")
-
-            # --------------------------------------------------------------------------
-            # PRINT INTERMEDIATE PROGRESS
-            # --------------------------------------------------------------------------
-
-            if steps % cfg['print_freq'] == 0 and rank == 0:
+            if rank == 0 and steps % cfg['print_freq'] == 0:
                 tqdm.write(
-                    'STEP {:7} | BATCH LOSS: {:.3f}'.format(steps, float(batch_loss))
+                    'EP: {:3} | TRAIN: {}'.format(
+                        ep, ' | '.join([f'LOSS: {metric_train_loss.compute():.3f}'])
+                    )
+                )
+                tqdm.write(
+                    'Step: {} | Batch Loss: {:.3f}'.format(steps, float(batch_loss))
                 )
                 wandb.log(
                     {'batch_loss': float(batch_loss), 'epoch': ep, 'step': steps},
@@ -319,53 +237,50 @@ def train(
                         'epoch': ep,
                         'steps': steps,
                     },
-                    #os.path.join(log_dir, 'model_922.pt'),
-                    os.path.join(log_dir, f'model_epoch_{ep+1}_step_{steps}.pt'),
+                    os.path.join(log_dir, 'model_test.pt'),
                 )
                 tqdm.write('---> CHECKPOINT SAVED <--- ')
-                print("checkpoint saved")
 
             # --------------------------------------------------------------------------
             # EVALUATION SAMPLES
             # --------------------------------------------------------------------------
-            #print("evalauation samples")
-            # if steps % cfg['sample_freq'] == 0:
-            #     if rank == 0:
-            #         tqdm.write('---> GENERATING SAMPLES FROM MODEL <---')
-            #     with autocast():
-            #         diff.model.eval()
-            #         diffusor = SR3DDIMDiffusor(
-            #             model=diff.model, schedule=diff.schedule, device=device
-            #         )
-            #         x_eval = x_sr[: min(cfg['sample_size'], len(x_sr))]
-            #         imgs = diffusor.p_sample_loop_with_steps(
-            #             sr=x_eval, log_every_t=diff.schedule.timesteps // 4
-            #         )
-            #         diff.model.train()
 
-            #     imgs = imgs.detach().float()
-            #     imgs.clamp_(-1, 1)
-            #     imgs = (imgs + 1) / 2
+            if steps % cfg['sample_freq'] == 0:
+                if rank == 0:
+                    tqdm.write('---> GENERATING SAMPLES FROM MODEL <---')
+                with autocast():
+                    diff.model.eval()
+                    diffusor = SR3DDIMDiffusor(
+                        model=diff.model, schedule=diff.schedule, device=device
+                    )
+                    x_eval = x_sr[: min(cfg['sample_size'], len(x_sr))]
+                    imgs = diffusor.p_sample_loop_with_steps(
+                        sr=x_eval, log_every_t=diff.schedule.timesteps // 4
+                    )
+                    diff.model.train()
 
-            #     tensor_list = [
-            #         torch.zeros(imgs.shape, dtype=torch.float, device=device)
-            #         for _ in range(world_size)
-            #     ]
-            #     dist.all_gather(tensor_list=tensor_list, tensor=imgs)
+                imgs = imgs.detach().float()
+                imgs.clamp_(-1, 1)
+                imgs = (imgs + 1) / 2
 
-            #     if rank == 0:
-            #         gathered_imgs = torch.cat(tensor_list, dim=1)
-            #         grid_path = os.path.join(
-            #             cfg['log_dir'], 'sample_step_{}'.format(str(steps).zfill(6))
-            #         )
-            #         save_sampling_grid(gathered_imgs, grid_path)
+                tensor_list = [
+                    torch.zeros(imgs.shape, dtype=torch.float, device=device)
+                    for _ in range(world_size)
+                ]
+                dist.all_gather(tensor_list=tensor_list, tensor=imgs)
 
-            #     dist.barrier()
+                if rank == 0:
+                    gathered_imgs = torch.cat(tensor_list, dim=1)
+                    grid_path = os.path.join(
+                        cfg['log_dir'], 'sample_step_{}'.format(str(steps).zfill(6))
+                    )
+                    save_sampling_grid(gathered_imgs, grid_path)
+
+                dist.barrier()
 
         # ------------------------------------------------------------------------------
         # METRIC COMPUTATION
         # ------------------------------------------------------------------------------
-        #print("metric computation")
         ep_train_loss = float(metric_train_loss.compute())
         metric_train_loss.reset()
 
@@ -378,20 +293,18 @@ def train(
             # Save model and exit.
             # This is due to time constraints in a SLURM Cluster.
             # A follow-up job is triggered externally to continue training.
-            # torch.save(
-            #     {
-            #         'model': diff.model.module.state_dict(),
-            #         'optimizer': optimizer.state_dict(),
-            #         'epoch': ep + 1,
-            #         'steps': steps,
-            #     },
-            #     #os.path.join(log_dir, 'model_11june_701.pt'),
-            #     os.path.join(log_dir, f'model_epoch_{ep}_step_{steps}.pt'),
-            # )
-        #print("cleanup start")
+            torch.save(
+                {
+                    'model': diff.model.module.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'epoch': ep + 1,
+                    'steps': steps,
+                },
+                os.path.join(log_dir, 'model.pt'),
+            )
+
         cleanup()
-        #print("ckleanup done ")
-        #return
+        return
 
 
 def save_sampling_grid(imgs: Tensor, save_path: str) -> None:
@@ -404,7 +317,7 @@ def save_sampling_grid(imgs: Tensor, save_path: str) -> None:
 
 def setup(rank: int, world_size: int) -> None:
     """Initialize environment for DDP training."""
-    # Set adress and port for node communication.
+    # Set address and port for node communication.
     # We simply choose localhost here, which should suffice in most cases.
     os.environ['MASTER_ADDR'] = 'localhost'
 
@@ -429,24 +342,16 @@ def setup(rank: int, world_size: int) -> None:
     print('DISTRIBUTED WORKER {} of {} INITIALIZED.'.format(rank + 1, world_size))
 
 
-# def cleanup():
-#     """Clean up process groups from DDP training."""
-#     #wandb.finish()
-#     dist.destroy_process_group()
-
-def is_dist_initialized():
-    return dist.is_initialized()
-
 def cleanup():
-    if is_dist_initialized():
-        dist.destroy_process_group()
+    """Clean up process groups from DDP training."""
+    wandb.finish()
+    dist.destroy_process_group()
 
 
 def main() -> None:
     """Execute main func."""
     world_size = torch.cuda.device_count()
     mp.spawn(run, args=(world_size, BASE_CONFIG), nprocs=world_size)
-
 
 
 if __name__ == '__main__':

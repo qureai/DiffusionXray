@@ -34,13 +34,18 @@ from diffusion.diffusor import SR3DDIMDiffusor
 from diffusion.utils import plot_image
 
 
+#transfer mask images 
+
+
+
+
 class CustomSRDataset(Dataset):
     def __init__(self, root: str, transforms: Compose) -> None:
         self.root = root
         self.transforms = transforms
 
-        self.sr_dir = os.path.join('/raid/MUNIT_data', '300k_lr_gaussian')
-        self.hr_dir = os.path.join('/raid/data_transfer/UNIT/100k', '100k_hr')
+        self.sr_dir = os.path.join(root, 'low_res_latest')
+        self.hr_dir = os.path.join(root, 'low_res_latest')
         self.image_names = os.listdir(self.sr_dir)
 
     def __len__(self):
@@ -51,38 +56,35 @@ class CustomSRDataset(Dataset):
 
         sr_img_path = os.path.join(self.sr_dir, img_name)
         hr_img_path = os.path.join(self.hr_dir, img_name)
+        
 
         sr_img = Image.open(sr_img_path).convert('L')  # Assuming grayscale images
         hr_img = Image.open(hr_img_path).convert('L')  # Assuming grayscale images
-
-        # Resize to 1024x1024 if not already that size using bicubic interpolation
-        if sr_img.size != (1024, 1024):
-            sr_img = sr_img.resize((1024, 1024), Image.BICUBIC)
-        if hr_img.size != (1024, 1024):
-            hr_img = hr_img.resize((1024, 1024), Image.BICUBIC)
+       
 
         sr_img = self.transforms(sr_img)
         hr_img = self.transforms(hr_img)
+        
 
         return {'LR': sr_img, 'HR': hr_img, 'SR': sr_img}
 
+
 #print("Environment setup complete.")
 
-
-
 BASE_CONFIG: Final = {
-    'epochs': 1000,
-    'batch_size': 20,
+    'epochs': 700,
+    'batch_size': 18,
     'num_workers': 16,
     'learning_rate': 5e-5,
     'print_freq': 50,
     'save_freq': 1000,
     'sample_freq': 5000,
     'sample_size': 4,
-    'resume_checkpoint': '/raid/data_transfer/chexray-diffusion/Train/checkpoints_ddpm_new_lowres/model_epoch_292_step_334000.pt', #change this 
+    'resume_checkpoint': '/raid/data_transfer/cheff_sr_base.pt', #path to non fine tuned 
     'data_root': '/raid/data_transfer/',
-    'log_dir': '/raid/data_transfer/chexray-diffusion/checkpoints_ddpm_lowres_newdata_finalft', #change this
-    'checkpoint_dir': 'checkpoints',
+    'log_dir': '/raid/data_transfer/chexray-diffusion/Train/checkpoints_ddpm_new_lowres',
+    'checkpoint_dir': 'checkpoints', #change this 
+
     'model_params': {
         'dim': 16,
         'channels': 2,
@@ -97,10 +99,6 @@ BASE_CONFIG: Final = {
     'loss_func': 'l1',
 }
 
-#print("configs checked")
-
-#checkpointt = torch.load(BASE_CONFIG['resume_checkpoint'])
-#print(checkpointt.keys())
 
 def run(rank: int, world_size: int, cfg: Dict) -> None:
     """Kick off training."""
@@ -108,7 +106,7 @@ def run(rank: int, world_size: int, cfg: Dict) -> None:
     device = torch.device(rank)
 
     if rank == 0:
-        wandb.init(project='fine-tuning-chexray-16th-aug-lowres-ddpm-300k-final-finetuning', config=cfg)
+        wandb.init(project='fine-tuning-ddpm-lowres-on-new-data', config=cfg)
 
     # ----------------------------------------------------------------------------------
     # CREATE DIFFUSION MODEL
@@ -127,39 +125,33 @@ def run(rank: int, world_size: int, cfg: Dict) -> None:
 
     optimizer = Adam(diff.get_model_params(), lr=cfg['learning_rate'])
 
-    if cfg['resume_checkpoint'] is not None and os.path.exists(
-        cfg['resume_checkpoint']
-    ):
+    if cfg['resume_checkpoint'] is not None and os.path.exists(cfg['resume_checkpoint']):
         state_dict = torch.load(cfg['resume_checkpoint'], map_location=device)
-        diff.model.module.load_state_dict(state_dict['model'])
-
-
-
-        if 'optimizer' in state_dict:
-            optimizer.load_state_dict(state_dict['optimizer'])
-        else:
-            print("Optimizer state not found in checkpoint, initializing from scratch.")
-
-        if 'epoch' in state_dict:
-            cfg['resume_ep'] = state_dict['epoch']
-        else:
-            print("Epoch information not found in the checkpoint, setting epoch to 0.")
-            cfg['resume_ep'] = 0
-        
-
-        if 'steps' in state_dict:
-            cfg['resume_steps'] = state_dict['steps']
-        else:
-            print("Steps information not found in the checkpoint, setting steps to 0.")
-            cfg['resume_steps'] = 0
+    
+    
         if rank == 0:
-            print(
-                '--> RETURNING FROM CHECKPOINT: EPOCH {} | STEP {}'.format(
-                    cfg['resume_ep'], cfg['resume_steps']
-                )
-            )
-        
-        del(state_dict)
+
+            if 'optimizer' in state_dict:
+                optimizer.load_state_dict(state_dict['optimizer'])
+            else:
+                print("Optimizer state not found in checkpoint, initializing from scratch.")
+
+            if 'epoch' in state_dict:
+                cfg['resume_ep'] = state_dict['epoch']
+            else:
+                print("Epoch information not found in the checkpoint, setting epoch to 0.")
+                cfg['resume_ep'] = 0
+
+            if 'steps' in state_dict:
+                cfg['resume_steps'] = state_dict['steps']
+            else:
+                print("Steps information not found in the checkpoint, setting steps to 0.")
+                cfg['resume_steps'] = 0
+    
+            if rank == 0:
+                print('--> RETURNING FROM CHECKPOINT: EPOCH {} | STEP {}'.format(cfg['resume_ep'], cfg['resume_steps']))
+    
+        del state_dict
         gc.collect()
 
     #print("CREATE DIFFUSION MODEL done")
@@ -262,28 +254,35 @@ def train(
             # True high resolution ground truth
             x_hr = batch['HR'].to(device)
             # Interpolated low resolution as conditioning
-            x_sr = batch['SR'].to(device)
+            #x_sr = batch['SR'].to(device)  #low_res -- use as conditioning
+            #x_mask = batch['Mask'].to(device)
 
             # Sample random timestep
-            t = torch.randint(
-                0, diff.schedule.timesteps, (x_sr.shape[0],), device=device
+            t = torch.randint( 
+                0, diff.schedule.timesteps, (x_hr.shape[0],), device=device
             ).long()
 
             # Create noisy HR image
-            noise = torch.randn_like(x_sr)
-            x_sr_noisy = diff.diffusor.q_sample(x_start=x_sr, t=t, noise=noise)
+            noise = torch.randn_like(x_hr)
+            noise2 = torch.randn_like(x_hr)
+            x_hr_noisy = diff.diffusor.q_sample(x_start=x_hr, t=t, noise=noise)
+            x_hr_noisy2 = diff.diffusor.q_sample(x_start=x_hr, t=t, noise=noise2)
+
+            # x_sr_noisy1 = diff.diffusor.q_sample(x_start=x_sr, t=t, noise=noise1)
+            # x_sr_noisy2 = diff.diffusor.q_sample(x_start=x_sr, t=t, noise=noise2)
 
             # Concatenate noisy HR image with SR image
-            x_in = torch.cat([x_sr_noisy, x_hr], dim=1)
+            #x_in = torch.cat([x_hr_noisy, x_sr], dim=1)
+            x_in = torch.cat([x_hr_noisy, x_hr_noisy2], dim=1)
 
-           
+            #x_in = x_sr_noisy
 
             # Predict noise on HR image
             with autocast():
                 # Predict noise on HR image
                 predicted_noise = diff.model(x_in, t)
                 # Compute loss
-                batch_loss = diff.loss_func(noise, predicted_noise)
+                batch_loss = diff.loss_func(noise + noise2, predicted_noise)
 
             optimizer.zero_grad()
             scaler.scale(batch_loss).backward()

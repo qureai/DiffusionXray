@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+*.log*
+logs/
+
+# Model checkpoints / weights
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+Train/checkpoints*/
+trained_models/
+Train/wandb/
+
+# Images / large artifacts
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+assets/
+
+# Local experiment dumps
+infer*.txt
+
+# Console outputs
+nohup.out
+*.out
