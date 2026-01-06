@@ -1,81 +1,151 @@
-# Cascaded Latent Diffusion for High-Resolution Chest X-ray Synthesis
+# CheX-ray Super-Resolution (MUNIT-LQ → DDPM-HQ)
 
-<p align="center">
-<img src=assets/intro_sample_grid.png />
-</p>
+This repo contains code for our CheX-ray14 super-resolution experiments:
 
-This repository contains code for running and training **Cheff** - a cascaded **che**st
-X-ray latent di**ff**usion pipeline.
-The cheff pipeline consists of three cascading phases:
+- **MUNIT-LQ**: low-quality (LQ) inputs generated from the CheX-ray14 test set (external MUNIT pipeline).
+- **DDPM-HQ**: a diffusion-based super-resolution model (CheffSR/SR3-style) trained / fine-tuned on **HQ–LQ** pairs to map **LQ → HQ**.
+- **DDPM-HQ outputs**: final super-res outputs produced by the DDPM-HQ model.
 
-1. Modeling a diffusion process in latent space
-2. Translating the latent variables into image space with a decoder
-3. Refinement and upscaling using a super-resolution diffusion process
+Most relevant entrypoints:
+- **Inference**: `cheff/sr/sampler.py`, `inference_batch_ddp.py`
+- **Training (DDP)**: `Train/train_ddpm_e2e.py`, `Train/train_sr_ddpm.py`
 
-Phase 1 and 2 together define an LDM.
-Phase 2 and 3 are trained on MaCheX, a collection of over 650,000 chest X-rays and thus,
-build a foundational basis for our model stack.
-The first phase is task-specific. For unconditional snythesis, we train on full MaCheX
-and for report-to-chest-X-ray we use the MIMIC subset.
+---
 
-<p align="center">
-<img src=assets/cheff_overview.png />
-</p>
+## Environment
 
-## How to use Cheff?
+We use the conda environment spec at `cascade7.yaml`:
 
-Please have a look into our [tutorial notebook](notebooks/01_cheff.ipynb).
-
-
-## Models
-
-We provide the weights for 5 models:
-
-- Chest X-ray autoencoder: [Click!](https://syncandshare.lrz.de/getlink/fiQ6wTe7K7otQzyifNh9av/cheff_autoencoder.pt)
-- Chest X-ray unconditioned semantic diffusion model: [Click!](https://syncandshare.lrz.de/getlink/fiE9pKbK38wzEvBrBCk95W/cheff_diff_uncond.pt)
-- Chest X-ray report-conditioned semantic diffusion model: [Click!](https://syncandshare.lrz.de/getlink/fi4R87B3cEWgSx4Wivyizb/cheff_diff_t2i.pt)
-- Chest X-ray super-resolution diffusion model base: [Click!](https://syncandshare.lrz.de/getlink/fiovQdSGXiTuWQ7scu7FA/cheff_sr_base.pt)
-- Chest X-ray super-resolution diffusion model finetuned: [Click!](https://syncandshare.lrz.de/getlink/fiHM4uAfy7uxcfBXkefySJ/cheff_sr_fine.pt)
-
-The [tutorial notebook](notebooks/01_cheff.ipynb) assumes that downloaded models are
-placed in `trained_models`.
-
-## Training
-
-Our codebase builds heavily on the classic LDM repository. Thus, we share the same
-interface with a few adaptions.
-A conda environment file for installing necessary dependencies is `environment.yml`.
-For a pip-only install use `requirements.txt`.
-The full config files are located in `configs`. After adjusting the paths, the training
-can be started as follows:
-
-```shell
-python scripts/01_train_ldm.py -b <path/to/config.yml> -t --no-test
+```bash
+conda env create -f cascade7.yaml
+conda activate cascade7
 ```
 
-### Training the Super-Resolution Model
+---
 
-The training procedure for reproducing `CheffSR` is located in an [extra repository](https://github.com/saiboxx/diffusion-pytorch).
-You will find a [script](https://github.com/saiboxx/diffusion-pytorch/blob/main/scripts/03_train_sr3_ddp.py) that contains the 
-necessary configuration and routine.
+## Where the data & outputs live (server paths)
 
+### Outputs used in our CheX-ray14 runs
 
-## Acknowledgements
+- **Diffusion-based baseline (bicubic SR)**: `/raid1/data_transfer/data/CheX-ray14/test_chexraybase_sr_bicubic/`
+- **DDPM-HQ outputs (DDPM on LQ inputs)** (per-GPU folder): `/raid1/data_transfer/data/CheX-ray14/test_lr_ddpm_2/folder_x/`
+- **MUNIT-LQ outputs**: `/raid2/data_transfer/data/CheX-ray14/test_lr_munit/all_images/all_images/`
+- **DDPM-HQ outputs**: `/raid1/data_transfer/data/CheX-ray14/test_munit_sr_ddpm/`
 
-This code builds heavily on the implementation of LDMs and DDPMs from CompVis:
-[Repository here](https://github.com/CompVis/latent-diffusion).
+### Curated qualitative bundle (100 matched images)
 
+- Folder: `/raid/collected_100_4way/`
+  - `diffusion_baseline/`
+  - `ddpm_lq/`
+  - `munit_lq/`
+  - `final_with_masks/` (DDPM-HQ outputs)
+  - `low_res_latest_160k/` (a 100-image low-res subset)
+- Zip (4-way only): `/raid/collected_100_4way.zip`
+- Zip (4-way + low-res): `/raid/collected_100_4way_with_lowres.zip`
 
-## Citation
+---
 
-If you use **Cheff** or our repository in your research, please cite our paper *Cascaded Latent Diffusion Models for High-Resolution Chest X-ray Synthesis*:
+## MUNIT-LQ (low-quality generation)
 
+**Reference output path** (already generated on servers):
+
+- `/raid2/data_transfer/data/CheX-ray14/test_lr_munit/all_images/all_images/`
+
+Notes:
+- Filenames are like `00000013_016.png` (no `super_resolved_` prefix).
+- These images are used as **LQ inputs** to the DDPM-HQ SR model.
+
+---
+
+## DDPM-HQ training (super-resolution diffusion, HQ–LQ)
+
+We train / fine-tune a CheffSR/SR3 diffusion model on **HQ–LQ** pairs to map **LQ → HQ**.
+
+### Baseline SR3 training (bicubic-conditioned) on MaCheX-style data
+
+Entrypoints:
+- `Train/train_ddpm_e2e.py`
+- `Train/scripts/04_train_chex_ddpm_ddp.py` (same training loop style)
+
+Run (important: `diffusion.*` imports live under `Train/`, so run from `Train/`):
+
+```bash
+cd /raid1/data_transfer/data/chexray-diffusion/Train
+PYTHONPATH=. python train_ddpm_e2e.py
 ```
-@inproceedings{weber2023cascaded,
-  title={Cascaded Latent Diffusion Models for High-Resolution Chest X-ray Synthesis},
-  author={Weber, Tobias and Ingrisch, Michael and Bischl, Bernd and R{\"u}gamer, David},
-  booktitle={Advances in Knowledge Discovery and Data Mining: 27th Pacific-Asia Conference, PAKDD 2023},
-  year={2023},
-  organization={Springer}
-}
+
+Update paths inside `BASE_CONFIG`:
+- `data_root`: MaCheX root (expects subfolders each containing an `index.json`)
+- `resume_checkpoint`: optional checkpoint to resume from
+- `log_dir`: where checkpoints are saved
+
+### DDPM-HQ fine-tuning on our “low_res_latest” folder
+
+Entrypoint:
+- `Train/train_sr_ddpm.py`
+
+By default it expects:
+- `data_root/low_res_latest/` (PNG/JPG images)
+
+In our setup, the latest low-res pool is here:
+- `/raid2/data_transfer/low_res_latest_160k/`
+
+If you want to use it without changing code, create a symlink named `low_res_latest` next to it:
+
+```bash
+ln -s /raid2/data_transfer/low_res_latest_160k /raid2/data_transfer/low_res_latest
 ```
+
+Run:
+
+```bash
+cd /raid1/data_transfer/data/chexray-diffusion/Train
+PYTHONPATH=. python train_sr_ddpm.py
+```
+
+Update paths inside `BASE_CONFIG` in `Train/train_sr_ddpm.py`:
+- `data_root`: parent directory that contains `low_res_latest/`
+- `resume_checkpoint`: base checkpoint to fine-tune from
+- `log_dir`: output checkpoint folder
+
+---
+
+## Inference (DDPM-HQ)
+
+### Multi-GPU batch inference on a folder (recommended)
+
+Entrypoint:
+- `inference_batch_ddp.py`
+
+Edit the hardcoded variables at the bottom of the file:
+- `sr_path`: checkpoint to load
+- `input_folder`: folder containing input images (`.png` / `.jpg`)
+- `output_folder`: where to write results
+- `batch_size`: per-GPU batch size
+
+Run:
+
+```bash
+cd /raid1/data_transfer/data/chexray-diffusion
+python inference_batch_ddp.py
+```
+
+Outputs are saved as `super_resolved_<original_filename>` in `output_folder`.
+
+Example (CheX-ray14 MUNIT-LQ → DDPM-HQ outputs):
+- `input_folder`: `/raid2/data_transfer/data/CheX-ray14/test_lr_munit/all_images/all_images/`
+- `output_folder`: `/raid1/data_transfer/data/CheX-ray14/test_lr_ddpm_2/folder_1/` (or any `folder_x/`)
+
+### Programmatic inference helper (single GPU)
+
+The core API is implemented in:
+- `cheff/sr/sampler.py` (`CheffSRModel.sample_path(...)`, `CheffSRModel.sample_directory(...)`)
+
+---
+
+## Notes / gotchas
+
+- **Training script imports**: `Train/train_*.py` imports `diffusion.*` from `Train/diffusion/`, so either:
+  - run from `chexray-diffusion/Train` with `PYTHONPATH=.`, or
+  - set `PYTHONPATH=/raid1/data_transfer/data/chexray-diffusion/Train`.
+- `inference.py` is a minimal snippet and expects an in-memory `imgs` tensor; for folder inference prefer `inference_batch_ddp.py` or `CheffSRModel.sample_directory(...)`.
